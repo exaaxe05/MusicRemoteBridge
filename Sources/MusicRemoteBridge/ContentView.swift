@@ -38,7 +38,12 @@ final class NowPlayingViewModel {
 
     var baseURL = "http://192.168.137.177"
 
-    private var pollingTask: Task<Void, Never>?
+    // MARK: Polling Task
+
+    @ObservationIgnored
+    nonisolated(unsafe) private var pollingTask: Task<Void, Never>?
+
+    @ObservationIgnored
     private var lastPayload: NowPlayingPayload?
 
     // MARK: Start
@@ -46,6 +51,7 @@ final class NowPlayingViewModel {
     func start() async {
 
         musicStatus = "Requesting Permission"
+        errorMessage = ""
 
         let authorization = await MusicAuthorization.request()
 
@@ -65,15 +71,23 @@ final class NowPlayingViewModel {
 
     func startPolling() {
 
-        pollingTask?.cancel()
+        stopPolling()
 
-        pollingTask = Task {
+        pollingTask = Task { [weak self] in
 
             while !Task.isCancelled {
 
-                await refreshNowPlaying()
+                guard let self else {
+                    break
+                }
 
-                try? await Task.sleep(for: .seconds(1))
+                await self.refreshNowPlaying()
+
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    break
+                }
             }
         }
     }
@@ -105,7 +119,7 @@ final class NowPlayingViewModel {
             return
         }
 
-        // Song information
+        // Song Information
 
         title = entry.title
         artist = entry.subtitle ?? ""
@@ -119,7 +133,7 @@ final class NowPlayingViewModel {
             artworkURL = nil
         }
 
-        // Playback status
+        // Playback Status
 
         isPlaying = player.state.playbackStatus == .playing
 
@@ -129,7 +143,7 @@ final class NowPlayingViewModel {
             ? max(0, currentTime)
             : 0
 
-        // Create payload
+        // Create Payload
 
         let payload = NowPlayingPayload(
             title: title,
@@ -141,7 +155,7 @@ final class NowPlayingViewModel {
             updatedAt: Int64(Date().timeIntervalSince1970)
         )
 
-        // Send only when information changes
+        // Send Only When Information Changes
 
         let hasChanged =
             payload.title != lastPayload?.title ||
@@ -167,11 +181,16 @@ final class NowPlayingViewModel {
             in: .whitespacesAndNewlines
         )
 
+        let normalizedURL = cleanURL.hasSuffix("/")
+            ? String(cleanURL.dropLast())
+            : cleanURL
+
         guard let url = URL(
-            string: cleanURL + "/api/nowplaying"
+            string: normalizedURL + "/api/nowplaying"
         ) else {
 
             espStatus = "Invalid Address"
+            errorMessage = "Please check the ESP32 IP address."
             return
         }
 
@@ -196,8 +215,11 @@ final class NowPlayingViewModel {
             guard let httpResponse = response as? HTTPURLResponse else {
 
                 espStatus = "Connection Error"
+                errorMessage = "Invalid HTTP response from ESP32."
                 return
             }
+
+            // HTTP Success
 
             if (200...299).contains(httpResponse.statusCode) {
 
@@ -207,6 +229,10 @@ final class NowPlayingViewModel {
             } else {
 
                 espStatus = "HTTP Error \(httpResponse.statusCode)"
+
+                errorMessage = """
+                ESP32 returned HTTP status code \(httpResponse.statusCode).
+                """
             }
 
         } catch {
@@ -215,7 +241,6 @@ final class NowPlayingViewModel {
             errorMessage = error.localizedDescription
         }
     }
-
 }
 
 // MARK: - Main UI
@@ -363,6 +388,7 @@ struct ContentView: View {
 
                         Task {
 
+                            model.stopPolling()
                             model.baseURL = esp32BaseURL
 
                             await model.start()
