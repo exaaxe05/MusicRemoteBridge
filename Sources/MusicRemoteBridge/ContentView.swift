@@ -4,7 +4,7 @@ import MusicKit
 import Foundation
 import Observation
 
-// MARK: - Now Playing JSON
+// MARK: - Now Playing Payload
 
 struct NowPlayingPayload: Codable, Equatable {
     var title: String
@@ -16,7 +16,7 @@ struct NowPlayingPayload: Codable, Equatable {
     var updatedAt: Int64
 }
 
-// MARK: - Companion App Model
+// MARK: - Now Playing View Model
 
 @MainActor
 @Observable
@@ -41,9 +41,10 @@ final class NowPlayingViewModel {
     private var pollingTask: Task<Void, Never>?
     private var lastPayload: NowPlayingPayload?
 
-    // MARK: Authorization
+    // MARK: Start
 
     func start() async {
+
         musicStatus = "Requesting Permission"
 
         let authorization = await MusicAuthorization.request()
@@ -63,54 +64,62 @@ final class NowPlayingViewModel {
     // MARK: Polling
 
     func startPolling() {
+
         pollingTask?.cancel()
 
         pollingTask = Task {
+
             while !Task.isCancelled {
+
                 await refreshNowPlaying()
 
-                try? await Task.sleep(
-                    for: .seconds(1)
-                )
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
 
     func stopPolling() {
+
         pollingTask?.cancel()
         pollingTask = nil
     }
 
-    // MARK: Read Apple Music
+    // MARK: Refresh Now Playing
 
     func refreshNowPlaying() async {
 
         let entry = player.queue.currentEntry
 
         guard let entry else {
+
             title = "Nothing Playing"
             artist = "Waiting for Apple Music..."
             album = ""
             artworkURL = nil
+
             isPlaying = false
             playbackTime = 0
 
             lastPayload = nil
+
             return
         }
+
+        // Song information
 
         title = entry.title
         artist = entry.subtitle ?? ""
         album = ""
 
+        // Artwork
+
         if let artwork = entry.artwork {
-            artworkURL = artwork.url(
-                width: 600,
-                height: 600
-            )
+            artworkURL = artwork.url(width: 600, height: 600)
         } else {
             artworkURL = nil
         }
+
+        // Playback status
 
         isPlaying = player.state.playbackStatus == .playing
 
@@ -119,6 +128,8 @@ final class NowPlayingViewModel {
         playbackTime = currentTime.isFinite
             ? max(0, currentTime)
             : 0
+
+        // Create payload
 
         let payload = NowPlayingPayload(
             title: title,
@@ -130,25 +141,25 @@ final class NowPlayingViewModel {
             updatedAt: Int64(Date().timeIntervalSince1970)
         )
 
-        if payload.title != lastPayload?.title ||
-           payload.artist != lastPayload?.artist ||
-           payload.album != lastPayload?.album ||
-           payload.artworkUrl != lastPayload?.artworkUrl ||
-           payload.isPlaying != lastPayload?.isPlaying ||
-           Int(payload.playbackTime) != Int(lastPayload?.playbackTime ?? -1) {
+        // Send only when information changes
+
+        let hasChanged =
+            payload.title != lastPayload?.title ||
+            payload.artist != lastPayload?.artist ||
+            payload.album != lastPayload?.album ||
+            payload.artworkUrl != lastPayload?.artworkUrl ||
+            payload.isPlaying != lastPayload?.isPlaying ||
+            Int(payload.playbackTime) != Int(lastPayload?.playbackTime ?? -1)
+
+        if hasChanged {
 
             lastPayload = payload
+
             await sendToESP32(payload)
-        } else if let lastPayload {
-            // ส่งข้อมูลเวลาเล่นเป็นระยะ
-            if Int(payload.playbackTime) != Int(lastPayload.playbackTime) {
-                self.lastPayload = payload
-                await sendToESP32(payload)
-            }
         }
     }
 
-    // MARK: Send JSON to ESP32
+    // MARK: Send Data To ESP32
 
     func sendToESP32(_ payload: NowPlayingPayload) async {
 
@@ -159,6 +170,7 @@ final class NowPlayingViewModel {
         guard let url = URL(
             string: cleanURL + "/api/nowplaying"
         ) else {
+
             espStatus = "Invalid Address"
             return
         }
@@ -174,6 +186,7 @@ final class NowPlayingViewModel {
         )
 
         do {
+
             request.httpBody = try JSONEncoder().encode(payload)
 
             let (_, response) = try await URLSession.shared.data(
@@ -181,26 +194,28 @@ final class NowPlayingViewModel {
             )
 
             guard let httpResponse = response as? HTTPURLResponse else {
+
                 espStatus = "Connection Error"
                 return
             }
 
             if (200...299).contains(httpResponse.statusCode) {
+
                 espStatus = "Connected"
                 errorMessage = ""
+
             } else {
+
                 espStatus = "HTTP Error \(httpResponse.statusCode)"
             }
 
         } catch {
+
             espStatus = "Disconnected"
             errorMessage = error.localizedDescription
         }
     }
 
-    deinit {
-        pollingTask?.cancel()
-    }
 }
 
 // MARK: - Main UI
@@ -223,17 +238,22 @@ struct ContentView: View {
                     // Artwork
 
                     Group {
+
                         if let artworkURL = model.artworkURL {
 
                             AsyncImage(url: artworkURL) { image in
+
                                 image
                                     .resizable()
                                     .scaledToFill()
+
                             } placeholder: {
+
                                 artworkPlaceholder
                             }
 
                         } else {
+
                             artworkPlaceholder
                         }
                     }
@@ -256,6 +276,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
 
                         if !model.album.isEmpty {
+
                             Text(model.album)
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
@@ -286,8 +307,11 @@ struct ContentView: View {
                     // Playback Time
 
                     HStack {
+
                         Text("Playback")
+
                         Spacer()
+
                         Text(
                             "\(Int(model.playbackTime)) sec"
                         )
@@ -336,11 +360,16 @@ struct ContentView: View {
                     // Retry Authorization
 
                     Button {
+
                         Task {
+
                             model.baseURL = esp32BaseURL
+
                             await model.start()
                         }
+
                     } label: {
+
                         Label(
                             "Connect / Retry",
                             systemImage: "arrow.clockwise"
@@ -349,7 +378,10 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
 
+                    // Error Message
+
                     if !model.errorMessage.isEmpty {
+
                         Text(model.errorMessage)
                             .font(.caption)
                             .foregroundStyle(.red)
@@ -359,14 +391,27 @@ struct ContentView: View {
                 .padding()
             }
             .navigationTitle("Music Remote Bridge")
+
+            // Initial Connection
+
             .task {
+
                 model.baseURL = esp32BaseURL
+
                 await model.start()
             }
+
+            // Address Changed
+
             .onChange(of: esp32BaseURL) { _, newValue in
+
                 model.baseURL = newValue
             }
+
+            // Stop Polling When View Disappears
+
             .onDisappear {
+
                 model.stopPolling()
             }
         }
@@ -375,9 +420,11 @@ struct ContentView: View {
     // MARK: Artwork Placeholder
 
     private var artworkPlaceholder: some View {
+
         RoundedRectangle(cornerRadius: 24)
             .fill(.ultraThinMaterial)
             .overlay {
+
                 Image(systemName: "music.note")
                     .font(.system(size: 70))
                     .foregroundStyle(.secondary)
