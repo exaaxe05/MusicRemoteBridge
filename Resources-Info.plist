@@ -1,0 +1,19 @@
+
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>MusicRemoteBridge needs permission to access Apple Music information and display the currently playing song.</string>
+
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>MusicRemoteBridge connects to your ESP32 over your local Wi-Fi network to send Now Playing information.</string>
+
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
